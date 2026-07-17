@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lidhit Widget — smoke test</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px 120px; }
+  h1 { font-size: 1.3rem; }
+  code { background: rgba(127,127,127,.15); padding: 2px 5px; border-radius: 4px; }
+  .steps { list-style: none; padding: 0; }
+  .steps li { padding: 8px 12px; margin: 6px 0; border-radius: 8px; background: rgba(127,127,127,.1); }
+  .steps li.done { background: rgba(46,160,67,.2); }
+  .steps li.done::after { content: " ✓"; color: #2ea043; font-weight: 700; }
+  #log { font: 13px/1.5 ui-monospace, monospace; white-space: pre-wrap; background: rgba(127,127,127,.1);
+         border-radius: 8px; padding: 12px; min-height: 60px; overflow-x: auto; }
+  .warn { color: #d29922; }
+  .err { color: #f85149; }
+</style>
+</head>
+<body>
+<h1>Lidhit Widget — smoke test (GH#788)</h1>
+
+<p id="params"></p>
+
+<p>Виджет — кнопка в правом нижнем углу. Сценарий: открыть чат → написать сообщение → оставить телефон.
+Каждое событие попадёт в <code>console.log</code> (DevTools → Console, префикс <code>[lidhit]</code>) и в лог ниже.</p>
+
+<ol class="steps">
+  <li id="step-open"><b>open</b> — посетитель открыл окно чата</li>
+  <li id="step-conversation_started"><b>conversation_started</b> — начался диалог (первое сообщение)</li>
+  <li id="step-lead_captured"><b>lead_captured</b> — получены контактные данные</li>
+</ol>
+
+<h2 style="font-size:1.05rem">Лог событий</h2>
+<div id="log">— пока пусто —</div>
+
+<script>
+(function () {
+  var qs = new URLSearchParams(location.search);
+  var siteKey = qs.get('siteKey');
+  var ym = qs.get('ym');
+  var logEl = document.getElementById('log');
+  var empty = true;
+
+  function log(cls, msg, data) {
+    if (empty) { logEl.textContent = ''; empty = false; }
+    var line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = new Date().toISOString().slice(11, 19) + '  ' + msg +
+      (data !== undefined ? '  ' + JSON.stringify(data) : '');
+    logEl.appendChild(line);
+  }
+
+  document.getElementById('params').innerHTML = siteKey
+    ? 'siteKey: <code>' + siteKey.replace(/[<>&]/g, '') + '</code>' +
+      (ym ? ', счётчик Метрики: <code>' + ym.replace(/[<>&]/g, '') + '</code> (автоцели включены)' : ', без Метрики')
+    : '';
+
+  if (!siteKey) {
+    log('err', 'Не передан site key. Откройте страницу как ?siteKey=ВАШ_КЛЮЧ (опционально &ym=НОМЕР_СЧЁТЧИКА).');
+    return;
+  }
+
+  var s = document.createElement('script');
+  s.src = 'https://lidhit.com/widget/v1/loader.js';
+  s.setAttribute('data-site-key', siteKey);
+  if (ym) s.setAttribute('data-ym-counter', ym);
+
+  s.onload = function () {
+    if (!window.LidhitChat) { log('err', 'loader.js загрузился, но window.LidhitChat не появился'); return; }
+    log(null, 'loader.js загружен, window.LidhitChat готов — подписываюсь на события');
+    ['open', 'conversation_started', 'lead_captured'].forEach(function (ev) {
+      window.LidhitChat.on(ev, function (data) {
+        console.log('[lidhit]', ev, data);
+        log(null, ev, data);
+        var step = document.getElementById('step-' + ev);
+        if (step) step.classList.add('done');
+      });
+    });
+  };
+  s.onerror = function () {
+    log('err', 'Не удалось загрузить https://lidhit.com/widget/v1/loader.js');
+  };
+
+  document.body.appendChild(s);
+})();
+</script>
+</body>
+</html>
