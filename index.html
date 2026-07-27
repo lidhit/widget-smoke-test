@@ -30,8 +30,16 @@
 <ol class="steps">
   <li id="step-open"><b>open</b> — посетитель открыл окно чата</li>
   <li id="step-conversation_started"><b>conversation_started</b> — начался диалог (первое сообщение)</li>
-  <li id="step-lead_captured"><b>lead_captured</b> — получены контактные данные</li>
+  <li id="step-qualification_completed"><b>qualification_completed</b> — квалификация завершена, получены контактные данные</li>
 </ol>
+
+<p><small><code>lead_captured</code> — прежнее имя того же события, оно продолжает приходить как deprecated-алиас
+(одновременно с <code>qualification_completed</code>, с тем же payload). Для новых интеграций используйте
+<code>qualification_completed</code>.</small></p>
+
+<p><small>По умолчанию страница грузит продовый <code>loader.js</code>. Чтобы проверить сборку из PR-превью,
+добавьте <code>&amp;loader=https://pr-123.lidhit.com/widget/v1/loader.js</code> — разрешены только адреса на
+<code>lidhit.com</code> и его поддоменах.</small></p>
 
 <h2 style="font-size:1.05rem">Лог событий</h2>
 <div id="log">— пока пусто —</div>
@@ -63,15 +71,38 @@
     return;
   }
 
+  // Источник loader.js. По умолчанию прод; ?loader=... позволяет проверить
+  // сборку из PR-превью или dev — иначе страница всегда проверяла бы прод,
+  // а не тот код, который в PR (GH#920).
+  var DEFAULT_LOADER = 'https://lidhit.com/widget/v1/loader.js';
+  function safeLoaderUrl(raw) {
+    if (!raw) return DEFAULT_LOADER;
+    var u;
+    try { u = new URL(raw, location.href); } catch (e) { return null; }
+    // Только https и только сам lidhit.com / его поддомены (dev, pr-N) —
+    // страница публичная, произвольный src здесь был бы дырой.
+    if (u.protocol !== 'https:') return null;
+    if (u.hostname !== 'lidhit.com' && !/\.lidhit\.com$/.test(u.hostname)) return null;
+    return u.href;
+  }
+  var loaderSrc = safeLoaderUrl(qs.get('loader'));
+  if (!loaderSrc) {
+    log('err', 'Параметр loader отклонён: разрешены только https-адреса на lidhit.com и поддоменах.');
+    return;
+  }
+  if (loaderSrc !== DEFAULT_LOADER) log(null, 'loader.js берётся не с прода: ' + loaderSrc);
+
   var s = document.createElement('script');
-  s.src = 'https://lidhit.com/widget/v1/loader.js';
+  s.src = loaderSrc;
   s.setAttribute('data-site-key', siteKey);
   if (ym) s.setAttribute('data-ym-counter', ym);
 
   s.onload = function () {
     if (!window.LidhitChat) { log('err', 'loader.js загрузился, но window.LidhitChat не появился'); return; }
     log(null, 'loader.js загружен, window.LidhitChat готов — подписываюсь на события');
-    ['open', 'conversation_started', 'lead_captured'].forEach(function (ev) {
+    // qualification_completed — основное имя; lead_captured — deprecated-алиас
+    // того же события, приходит одновременно и с тем же payload (GH#920).
+    ['open', 'conversation_started', 'qualification_completed', 'lead_captured'].forEach(function (ev) {
       window.LidhitChat.on(ev, function (data) {
         console.log('[lidhit]', ev, data);
         log(null, ev, data);
@@ -81,7 +112,7 @@
     });
   };
   s.onerror = function () {
-    log('err', 'Не удалось загрузить https://lidhit.com/widget/v1/loader.js');
+    log('err', 'Не удалось загрузить ' + loaderSrc);
   };
 
   document.body.appendChild(s);
